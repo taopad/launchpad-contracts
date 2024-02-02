@@ -13,6 +13,7 @@ contract Launchpad {
     event TokensPurchased(address indexed _token, address indexed buyer, uint256 amount);
     event TokensClaimed(address indexed _token, address indexed buyer, uint256 amount);
     event ethPricePerTokenUpdated(address indexed _token, uint256 newEthPricePerToken);
+    event WhitelistUpdated(uint256 wlBlockNumber, uint256 wlMinBalance, bytes32 wlRoot);
     event TokenHardCapUpdated(address indexed _token, uint256 newTokenHardCap);
     event OperatorTransferred(address indexed previousOperator, address indexed newOperator);
     event VestingDurationUpdated(uint256 newVestingDuration);
@@ -51,6 +52,10 @@ contract Launchpad {
     mapping (address => uint256) public purchasedAmount;
     mapping (address => uint256) public claimedAmount;
     uint256 public totalPurchasedAmount;
+
+    uint256 public wlBlockNumber;
+    uint256 public wlMinBalance;
+    bytes32 public wlRoot;
 
     constructor(
         string memory _name,
@@ -148,6 +153,21 @@ contract Launchpad {
     }
 
     /**
+     * @param _wlBlockNumber block number of the whitelist's snapshot
+     * @param _wlMinBalance min balance threshold of the whitelist
+     * @param _wlMinBalance merkle tree root of the whitelist
+     *
+     * When set, the buyTokens() will require a proof matching the buyer address and this root.
+     */
+    function updateWhitelist(uint256 _wlBlockNumber, uint256 _wlMinBalance, bytes _wlRoot) external onlyOperator {
+        wlBlockNumber = _wlBlockNumber;
+        wlMinBalance = _wlMinBalance;
+        wlRoot = _wlRoot;
+
+        emit WhitelistUpdated(wlBlockNumber, wlMinBalance, wlRoot);
+    }
+
+    /**
      * 
      * @param _tokenHardCapIncrement amount of tokens to increase the hard cap by
      * This function is used to increase the hard cap of the launchpad.
@@ -198,13 +218,20 @@ contract Launchpad {
     }
 
     /**
+     * @param proof the proof in case this launchpad has a whitelist, empty otherwise.
      * Allows the user to buy tokens during the launchpad.
      */
-
-    function buyTokens() external payable {
+    function buyTokens(bytes32[] calldata proof) external payable {
         require(isStarted(), "Launchpad: NOT_STARTED");
         require(!isEnded(), "Launchpad: ENDED");
         require(msg.value > 0, "Launchpad: INVALID_BUY_AMOUNT");
+
+        // check proof validity when a whitelist has been set.
+        if (wlBlockNumber > 0 && !MerkleProof.verifyCalldata(
+            proof, wlRoot, keccak256(bytes.concat(keccak256(abi.encode(msg.sender))))
+        )) {
+            revert("Launchpad: NOT_WHITELISTED");
+        }
 
         uint256 _tokensAmount = ethToToken(msg.value);
         require(
