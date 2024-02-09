@@ -6,6 +6,11 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "./interfaces/ILaunchpadFactory.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import {MainLaunchpadInfo} from "./interfaces/ILaunchpadFactory.sol";
+import "./constants/Errors.sol";
+
+
 
 contract Launchpad {
     using SafeERC20 for IERC20;
@@ -18,10 +23,7 @@ contract Launchpad {
     event OperatorTransferred(address indexed previousOperator, address indexed newOperator);
     event VestingDurationUpdated(uint256 newVestingDuration);
     modifier onlyOperator() {
-        require(
-            msg.sender == operator,
-            "Launchpad: CALLER_NOT_OPERATOR"
-        );
+        if (msg.sender != operator) revert OperatorZeroAddress();
         _;
     }
 
@@ -58,57 +60,41 @@ contract Launchpad {
     bytes32 public wlRoot;
 
     constructor(
-        string memory _name,
-        address _token,
-        uint256 _ethPricePerToken,
-        uint256 _minTokenBuy,
-        uint256 _maxTokenBuy,
-        uint256 _startDate,
-        uint256 _endDate,
+        MainLaunchpadInfo memory _info,
         uint256 _protocolFee,
         address _protocolFeeAddress,
-        uint256 _releaseDelay,
-        uint256 _vestingDuration,
-        address _operator
+        address _operator,
+        address _factory
     ) {
 
-        name = _name;
-        factory = msg.sender;
+        name = _info.name;
+        factory = _factory;
 
-        require(_token != address(0), "Launchpad: ZERO_ADDRESS");
-        require(_ethPricePerToken > 0, "Launchpad: INVALID_ETH_PRICE");
-        require(_minTokenBuy > 0, "Launchpad: INVALID_MIN_TOKEN_BUY");
-        require(_maxTokenBuy > 0, "Launchpad: INVALID_MAX_TOKEN_BUY");
-        require(_startDate > block.timestamp, "Launchpad: INVALID_START_DATE");
-        require(_endDate > _startDate, "Launchpad: INVALID_END_DATE");
-        require(_protocolFee > 0, "Launchpad: INVALID_PROTOCOL_FEE");
-        require(
-            _protocolFeeAddress != address(0),
-            "Launchpad: ZERO_PROTOCOL_FEE_ADDRESS"
-        );
+        if (_info.ethPricePerToken == 0) revert InvalidEthPrice();
+        if (_info.minTokenBuy == 0) revert InvalidMinTokenBuy();
+        if (_info.maxTokenBuy == 0) revert InvalidMaxTokenBuy();
+        if (_info.startDate <= block.timestamp) revert InvalidStartDate();
+        if (_info.endDate <= _info.startDate) revert InvalidEndDate();
+        if (_operator == address(0)) revert ZeroAddress();
 
-        require(
-            _operator != address(0),
-            "Launchpad: OPERATOR_ZERO_ADDRESS"
-        );
         operator = _operator;
 
-        token = IERC20(_token);
-        decimals = IERC20Metadata(_token).decimals();
+        token = IERC20(_info.token);
+        decimals = IERC20Metadata(_info.token).decimals();
         tokenUnit = 10**decimals;
 
-        ethPricePerToken = _ethPricePerToken;
-        minTokenBuy = _minTokenBuy;
-        maxTokenBuy = _maxTokenBuy;
+        ethPricePerToken = _info.ethPricePerToken;
+        minTokenBuy = _info.minTokenBuy;
+        maxTokenBuy = _info.maxTokenBuy;
 
-        startDate = _startDate;
-        endDate = _endDate;
+        startDate = _info.startDate;
+        endDate = _info.endDate;
 
         protocolFee = _protocolFee;
         protocolFeeAddress = _protocolFeeAddress;
 
-        releaseDelay = _releaseDelay;
-        vestingDuration = _vestingDuration;
+        releaseDelay = _info.releaseDelay;
+        vestingDuration = _info.vestingDuration;
 
     }
 
@@ -143,10 +129,8 @@ contract Launchpad {
      */
 
     function transferOperatorOwnership(address newOperator) external onlyOperator {
-        require(
-            newOperator != address(0) && newOperator != operator,
-            "Launchpad: OPERATOR_INVALID_ADDRESS"
-        );
+        if (newOperator == address(0)) revert ZeroAddress();
+        if (newOperator == operator) revert SameOperator();
 
         emit OperatorTransferred(operator, newOperator);
         operator = newOperator;
@@ -159,7 +143,7 @@ contract Launchpad {
      *
      * When set, the buyTokens() will require a proof matching the buyer address and this root.
      */
-    function updateWhitelist(uint256 _wlBlockNumber, uint256 _wlMinBalance, bytes _wlRoot) external onlyOperator {
+    function updateWhitelist(uint256 _wlBlockNumber, uint256 _wlMinBalance, bytes32 _wlRoot) external onlyOperator {
         wlBlockNumber = _wlBlockNumber;
         wlMinBalance = _wlMinBalance;
         wlRoot = _wlRoot;
@@ -175,10 +159,7 @@ contract Launchpad {
      */
 
     function increaseHardCap(uint256 _tokenHardCapIncrement) external onlyOperator {
-        require(
-            _tokenHardCapIncrement > 0,
-            "Launchpad: INVALID_TOKEN_HARD_CAP_INCREMENT"
-        );
+        if (_tokenHardCapIncrement == 0) revert InvalidTokenHardCapIncrement();
 
         uint256 _feeAmount = _tokenHardCapIncrement * protocolFee / 10000;
         if (_feeAmount > 0) {
@@ -198,10 +179,7 @@ contract Launchpad {
      */
 
     function updateEthPricePerToken(uint256 _ethPricePerToken) external onlyOperator {
-        require(
-            _ethPricePerToken > 0,
-            "Launchpad: INVALID_ETH_PRICE"
-        );
+        if (_ethPricePerToken == 0) revert InvalidEthPrice();
         emit ethPricePerTokenUpdated(address(token), _ethPricePerToken);
         ethPricePerToken = _ethPricePerToken;
     }
@@ -222,32 +200,30 @@ contract Launchpad {
      * Allows the user to buy tokens during the launchpad.
      */
     function buyTokens(bytes32[] calldata proof) external payable {
-        require(isStarted(), "Launchpad: NOT_STARTED");
-        require(!isEnded(), "Launchpad: ENDED");
-        require(msg.value > 0, "Launchpad: INVALID_BUY_AMOUNT");
+        if (!isStarted()) revert NotStarted();
+        if (isEnded()) revert Ended();
+        if (msg.value == 0) revert InvalidBuyAmount();
+
 
         // check proof validity when a whitelist has been set.
         if (wlBlockNumber > 0 && !MerkleProof.verifyCalldata(
             proof, wlRoot, keccak256(bytes.concat(keccak256(abi.encode(msg.sender))))
         )) {
-            revert("Launchpad: NOT_WHITELISTED");
+            revert InvalidWhitelistProof();
         }
 
         uint256 _tokensAmount = ethToToken(msg.value);
-        require(
-            _tokensAmount >= minTokenBuy,
-            "Launchpad: AMOUNT_TOO_LOW"
-        );
+        if (_tokensAmount < minTokenBuy) {
+            revert AmountTooLow();
+        }
 
-        require(
-            purchasedAmount[msg.sender] + _tokensAmount <= maxTokenBuy,
-            "Launchpad: EXCEEDS_MAX_TOKENS_AMOUNT"
-        );
+        if (purchasedAmount[msg.sender] + _tokensAmount > maxTokenBuy) {
+            revert AmountExceedsMaxTokenAmount();
+        }
 
-        require(
-            totalPurchasedAmount + _tokensAmount <= tokenHardCap,
-            "Launchpad: EXCEEDS_TOKEN_HARD_CAP"
-        );
+        if (totalPurchasedAmount + _tokensAmount > tokenHardCap) {
+            revert AmountExceedsHardCap();
+        }
 
         purchasedAmount[msg.sender] += _tokensAmount;
         totalPurchasedAmount += _tokensAmount;
@@ -293,12 +269,17 @@ contract Launchpad {
      */
 
     function claimTokens() external {
-        require(isClaimable(), "Launchpad: NOT_CLAIMABLE");
-        require(purchasedAmount[msg.sender] > 0, "Launchpad: NO_PURCHASED_TOKENS");
+        if (!isClaimable()) {
+            revert NotClaimable();
+        }
+        if (purchasedAmount[msg.sender] == 0) {
+            revert NoPurchasedTokens();
+        }
 
         uint256 _claimableAmount = claimableAmount(msg.sender);
-        require(_claimableAmount > 0, "Launchpad: NO_CLAIMABLE_TOKENS");
-
+        if (_claimableAmount == 0) {
+            revert NoClaimableTokens();
+        }
         claimedAmount[msg.sender] += _claimableAmount;
 
         token.safeTransfer(msg.sender, _claimableAmount);
@@ -311,11 +292,17 @@ contract Launchpad {
      */
 
     function withdrawEth() external onlyOperator {
-        require(isEnded(), "Launchpad: NOT_ENDED");
+        if (!isEnded()) {
+            revert NotEnded();
+        }
         uint256 _balance = address(this).balance;
-        require(_balance > 0, "Launchpad: NO_BALANCE_TO_WITHDRAW");
+        if (_balance == 0) {
+            revert NoBalanceToWithdraw();
+        }
         (bool success, ) = payable(msg.sender).call{value: _balance}("");
-        require(success, "Launchpad: ETH_TRANSFER_FAILED");
+        if (!success) {
+            revert EthereumTransferFailed();
+        }
     }
 
     /**
@@ -324,7 +311,9 @@ contract Launchpad {
      */
 
     function withdrawTokens() external onlyOperator {
-        require(isEnded(), "Launchpad: NOT_ENDED");
+        if (!isEnded()) {
+            revert NotEnded();
+        }
         uint256 _balance = token.balanceOf(address(this));
         uint256 _purchasedAmount = totalPurchasedAmount;
 
@@ -334,8 +323,9 @@ contract Launchpad {
             _balance -= _purchasedAmount;
         }
 
-        require(_balance > 0, "Launchpad: NO_BALANCE_TO_WITHDRAW");
-
+        if (_balance <= 0) {
+            revert NoBalanceToWithdraw();
+        }
         token.safeTransfer(msg.sender, _balance);
     }
 
@@ -371,14 +361,19 @@ contract Launchpad {
 
     function transferPurchasedOwnership(address _newOwner) external {
 
-        require(!isEnded(), "Launchpad: ENDED");
+        if (isEnded()) {
+            revert Ended();
+        }
 
         uint256 _purchasedAmount = purchasedAmount[msg.sender];
         uint256 _newUserPurchaseAmount = purchasedAmount[_newOwner];
 
-        require(_newUserPurchaseAmount + _purchasedAmount <= maxTokenBuy, "Launchpad: EXCEEDS_MAX_TOKENS_AMOUNT");
+        if (_newUserPurchaseAmount + _purchasedAmount > maxTokenBuy) {
+            revert AmountExceedsMaxTokenAmount();
+        }
 
         purchasedAmount[msg.sender] = 0;
         purchasedAmount[_newOwner] += _purchasedAmount;
     }
 }
+

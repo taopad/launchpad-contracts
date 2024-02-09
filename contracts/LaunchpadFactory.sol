@@ -6,12 +6,17 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "./Launchpad.sol";
+import "./constants/Errors.sol";
+
+import {ILaunchpadDeployer} from "./interfaces/ILaunchpadDeployer.sol";
+import {MainLaunchpadInfo} from "./interfaces/ILaunchpadFactory.sol";
 
 contract LaunchpadFactory is Ownable(msg.sender) {
 
     event LaunchpadCreated(address indexed launchpad, address indexed token);
     event ProtocolFeeUpdated(address indexed protocolFeeAddress, uint256 newProtocolFee);
-    event ProtocolFeeAddressUpdated(address protocolFeeAddress, address newProtocolFeeAddress);
+    event ProtocolFeeAddressUpdated(address oldProtocolFeeAddress, address newProtocolFeeAddress);
+    event DeployerUpdated(address oldDeployer, address newDeployer);
 
     using SafeERC20 for IERC20;
 
@@ -24,23 +29,18 @@ contract LaunchpadFactory is Ownable(msg.sender) {
 
     mapping(address => bool) public isTrusted;
 
-    constructor(address _protocolFeeAddress, uint256 _protocolFee) {
+    ILaunchpadDeployer public deployer;
 
-        require(
-            _protocolFeeAddress != address(0),
-            "LaunchpadFactory: ZERO_PROTOCOL_FEE_ADDRESS"
-        );
+    constructor(address _protocolFeeAddress, uint256 _protocolFee, address _deployer) {
 
-        require(
-            _protocolFee > 0,
-            "LaunchpadFactory: INVALID_PROTOCOL_FEE"
-        );
+        if (_deployer == address(0) || _protocolFeeAddress == address(0)) revert ZeroAddress();
+        
+        if (_protocolFee > 1000) {
+            revert InvalidProtocolFee();
+        }
 
         protocolFeeAddress = _protocolFeeAddress;
-
-        // 10% MAX protocol fee
-        require(_protocolFee <= 1000, "LaunchpadFactory: INVALID_PROTOCOL_FEE");
-
+        deployer = ILaunchpadDeployer(_deployer);
         protocolFee = _protocolFee;
 
     }
@@ -81,10 +81,15 @@ contract LaunchpadFactory is Ownable(msg.sender) {
         isTrusted[_address] = false;
     }
 
+    function setDeployer(address _deployer) external onlyOwner {
+        deployer = ILaunchpadDeployer(_deployer);
+    }
+
     function updateProtocolFee(uint256 _protocolFee) external onlyOwner {
 
-        // 10% MAX protocol fee
-        require(_protocolFee <= 1000, "LaunchpadFactory: INVALID_PROTOCOL_FEE");
+        if (_protocolFee > 1000) {
+            revert InvalidProtocolFee();
+        }
 
         protocolFee = _protocolFee;
         emit ProtocolFeeUpdated(protocolFeeAddress, protocolFee);
@@ -92,47 +97,24 @@ contract LaunchpadFactory is Ownable(msg.sender) {
     }
 
     function updateProtocolFeeAddress(address _protocolFeeAddress) external onlyOwner {
-        require(
-            _protocolFeeAddress != address(0),
-            "LaunchpadFactory: ZERO_PROTOCOL_FEE_ADDRESS"
-        );
+        if (_protocolFeeAddress == address(0))
+            revert ZeroAddress();
+
         emit ProtocolFeeAddressUpdated(protocolFeeAddress, _protocolFeeAddress);
         protocolFeeAddress = _protocolFeeAddress;
     }
 
     function createLaunchpad(
-        string memory _name,
-        address _token,
-        uint256 _ethPricePerToken,
-        uint256 _minTokenBuy,
-        uint256 _maxTokenBuy,
-        uint256 _startDate,
-        uint256 _endDate,
-        uint256 _releaseDelay,
-        uint256 _vestingDuration
+        MainLaunchpadInfo memory _mainLaunchpadInfo
     ) external returns (address) {
 
-        Launchpad launchpad = new Launchpad(
-            _name,
-            _token,
-            _ethPricePerToken,
-            _minTokenBuy,
-            _maxTokenBuy,
-            _startDate,
-            _endDate,
-            protocolFee,
-            protocolFeeAddress,
-            _releaseDelay,
-            _vestingDuration,
-            msg.sender
-        );
+        address _launchpad = deployer.deployLaunchpad(_mainLaunchpadInfo, msg.sender);
 
-        _launchpads.add(address(launchpad));
+        require(_launchpads.add(_launchpad));
 
-        emit LaunchpadCreated(address(launchpad), _token);
+        emit LaunchpadCreated(address(_launchpad), _mainLaunchpadInfo.token);
 
-        return address(launchpad);
+        return address(_launchpad);
     }
-
 
 }

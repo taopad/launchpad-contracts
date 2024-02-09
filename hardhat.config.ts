@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 import "hardhat-gas-reporter"
@@ -12,16 +13,9 @@ const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.23",
     settings: {
-      viaIR: true,
       optimizer: {
         enabled: true,
-        runs: 1000,
-        details: {
-          yul: true,
-          yulDetails: {
-            optimizerSteps: "u",
-          },
-        },
+        runs: 3000,       
       },
     },
   },
