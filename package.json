@@ -1,12 +1,17 @@
 {
   "name": "hardhat-project",
   "devDependencies": {
+    "@nomicfoundation/hardhat-ignition-viem": "^0.13.2",
     "@nomicfoundation/hardhat-toolbox": "^2.0.2",
-    "hardhat": "^2.19.4"
+    "hardhat": "^2.19.4",
+    "hardhat-deploy": "^0.11.45"
   },
   "dependencies": {
+    "@nomicfoundation/hardhat-toolbox-viem": "^2.0.0",
+    "@nomicfoundation/hardhat-viem": "^1.0.3",
     "@openzeppelin/contracts": "^5.0.1",
     "dotenv": "^16.4.1",
-    "hardhat-gas-reporter": "^1.0.9"
+    "hardhat-gas-reporter": "^1.0.9",
+    "viem": "^1.21.4"
   }
 }

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 import "hardhat-gas-reporter"
+import 'hardhat-deploy';
 
 const config: HardhatUserConfig = {
   gasReporter: {
@@ -10,6 +11,25 @@ const config: HardhatUserConfig = {
     coinmarketcap: process.env.CMC_API_KEY,
     gasPriceApi: 'https://api.etherscan.io/api?module=proxy&action=eth_gasPrice'
   },
+  namedAccounts: {
+    deployer: 0
+  },
+  networks: {
+    hardhat: {
+			forking: {
+				url: process.env.MAINNET_RPC_URL || '',
+    	},
+		},
+		buildbear: {
+			url: process.env.BUILDBEAR_RPC_URL || '',
+			accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+		},
+		mainnet: {
+			url: process.env.MAINNET_RPC_URL || '',
+			accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+			gasPrice: 100000000000,
+		},
+	},
   solidity: {
     version: "0.8.23",
     settings: {
