@@ -12,6 +12,10 @@ import {
   TokenMockup__factory,
 } from "../typechain-types";
 
+function consoleLog(...args: any[]) {
+  //console.log(...args);
+}
+
 async function deployTokenFixture() {
   const [tokenOwner] = await ethers.getSigners();
 
@@ -187,12 +191,12 @@ describe("TaoPad Launch Pad", function () {
       const ethPricePerToken = await launchpad.ethPricePerToken();
       const ethToToken = await launchpad.ethToToken(ethAmount);
 
-      console.log(
+      consoleLog(
         `\t[+] ${ethers.utils.formatEther(
           ethToToken
         )} tokens for ${ethers.utils.formatEther(ethAmount)} ETH`
       );
-      console.log(
+      consoleLog(
         `\t[+] ${ethers.utils.formatEther(ethPricePerToken)} ETH per token`
       );
 
@@ -204,8 +208,8 @@ describe("TaoPad Launch Pad", function () {
 
       const block = await ethers.provider.getBlock("latest");
 
-      console.log(`\t[+] Current block timestamp: ${block.timestamp}`);
-      console.log(
+      consoleLog(`\t[+] Current block timestamp: ${block.timestamp}`);
+      consoleLog(
         `\t[+] Presale start timestamp: ${await launchpad.startDate()}`
       );
 
@@ -242,12 +246,12 @@ describe("TaoPad Launch Pad", function () {
       const ethPricePerToken = await launchpad.ethPricePerToken();
       const ethToToken = await launchpad.ethToToken(ethAmount);
 
-      console.log(
+      consoleLog(
         `\t[+] ${ethers.utils.formatEther(
           ethToToken
         )} tokens for ${ethers.utils.formatEther(ethAmount)} ETH`
       );
-      console.log(
+      consoleLog(
         `\t[+] ${ethers.utils.formatEther(ethPricePerToken)} ETH per token`
       );
 
@@ -259,8 +263,8 @@ describe("TaoPad Launch Pad", function () {
 
       const block = await ethers.provider.getBlock("latest");
 
-      console.log(`\t[+] Current block timestamp: ${block.timestamp}`);
-      console.log(
+      consoleLog(`\t[+] Current block timestamp: ${block.timestamp}`);
+      consoleLog(
         `\t[+] Presale start timestamp: ${await launchpad.startDate()}`
       );
 
@@ -326,12 +330,12 @@ describe("TaoPad Launch Pad", function () {
       const ethPricePerToken = await launchpad.ethPricePerToken();
       const ethToToken = await launchpad.ethToToken(ethAmount);
 
-      console.log(
+      consoleLog(
         `\t[+] ${ethers.utils.formatEther(
           ethToToken
         )} tokens for ${ethers.utils.formatEther(ethAmount)} ETH`
       );
-      console.log(
+      consoleLog(
         `\t[+] ${ethers.utils.formatEther(ethPricePerToken)} ETH per token`
       );
 
@@ -343,8 +347,8 @@ describe("TaoPad Launch Pad", function () {
 
       const block = await ethers.provider.getBlock("latest");
 
-      console.log(`\t[+] Current block timestamp: ${block.timestamp}`);
-      console.log(
+      consoleLog(`\t[+] Current block timestamp: ${block.timestamp}`);
+      consoleLog(
         `\t[+] Presale start timestamp: ${await launchpad.startDate()}`
       );
 
@@ -366,8 +370,8 @@ describe("TaoPad Launch Pad", function () {
 
       const newBlock = await ethers.provider.getBlock("latest");
 
-      console.log(`\t[+] Current block timestamp: ${newBlock.timestamp}`);
-      console.log(`\t[+] Presale+delay end timestamp: ${endDateAfterRelease}`);
+      consoleLog(`\t[+] Current block timestamp: ${newBlock.timestamp}`);
+      consoleLog(`\t[+] Presale+delay end timestamp: ${endDateAfterRelease}`);
 
       expect(await launchpad.isClaimable()).to.be.true;
 
@@ -376,7 +380,7 @@ describe("TaoPad Launch Pad", function () {
       const user1BalanceAfterClaim = await token.balanceOf(user1.address);
       const netBalance = user1BalanceAfterClaim.sub(user1BalanceBeforeClaim);
 
-      console.log(
+      consoleLog(
         `\t[+] User 1 claimed: ${ethers.utils.formatEther(netBalance)}`
       );
 
@@ -384,7 +388,7 @@ describe("TaoPad Launch Pad", function () {
 
       expect(newClaimableAmount).to.equal(0);
 
-      console.log(
+      consoleLog(
         `\t[+] User 1 claimable amount after first claim: ${ethers.utils.formatEther(
           newClaimableAmount
         )}`
@@ -397,7 +401,7 @@ describe("TaoPad Launch Pad", function () {
       );
       await mine();
 
-      console.log("\t[+] Vesting duration passed");
+      consoleLog("\t[+] Vesting duration passed");
 
       const newClaimableAmountAfterVesting = await launchpad.claimableAmount(
         user1.address
@@ -409,7 +413,7 @@ describe("TaoPad Launch Pad", function () {
 
       expect(newClaimableAmountAfterVesting).to.equal(amountToClaim);
 
-      console.log(
+      consoleLog(
         `\t[+] User 1 claimable amount after vesting: ${ethers.utils.formatEther(
           newClaimableAmountAfterVesting
         )}`
@@ -423,11 +427,11 @@ describe("TaoPad Launch Pad", function () {
 
       expect(netBalance2).to.equal(amountToClaim);
 
-      console.log(
+      consoleLog(
         `\t[+] User 1 claimed: ${ethers.utils.formatEther(netBalance2)}`
       );
 
-      console.log(`\t[+] Withdraw unsold tokens`);
+      consoleLog(`\t[+] Withdraw unsold tokens`);
 
       const operator = projectOwner;
 
@@ -441,13 +445,13 @@ describe("TaoPad Launch Pad", function () {
         operatorBalanceBefore
       );
 
-      console.log(
+      consoleLog(
         `\t[+] Operator balance after withdraw unsold tokens: ${ethers.utils.formatEther(
           newOperatorBalance
         )}`
       );
 
-      console.log(`\t[+] Withdraw gained ETH`);
+      consoleLog(`\t[+] Withdraw gained ETH`);
 
       const projectOwnerBalanceBefore = await ethers.provider.getBalance(
         operator.address
@@ -463,7 +467,7 @@ describe("TaoPad Launch Pad", function () {
         projectOwnerBalanceBefore
       );
 
-      console.log(
+      consoleLog(
         `\t[+] Project owner balance after withdraw ETH: ${ethers.utils.formatEther(
           newProjectOwnerBalance
         )}`
