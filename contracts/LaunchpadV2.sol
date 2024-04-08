@@ -88,7 +88,7 @@ contract LaunchpadV2 {
         tokenUnit = 10 ** decimals;
 
         ethPricePerToken = _info.ethPricePerToken;
-        minTokenBuy = _info.minTokenBuy;
+        minTokenBuy = _info.minTokenBuy == 0 ? tokenUnit : _info.minTokenBuy;
         // maxTokenBuy = _info.maxTokenBuy; // no more global max buy
 
         startDate = _info.startDate;
