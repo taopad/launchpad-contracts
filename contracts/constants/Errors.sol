@@ -5,6 +5,7 @@ error ZeroAddress();
 error NotOperator();
 error SameOperator();
 error OperatorZeroAddress();
+error Started();
 error Ended();
 error NotStarted();
 error NotEnded();

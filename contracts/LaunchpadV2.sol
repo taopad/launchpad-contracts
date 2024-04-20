@@ -137,6 +137,26 @@ contract LaunchpadV2 {
     }
 
     /**
+     * @param _ethPricePerToken new ETH price per token
+     * This function is used to change the ETH price per token.
+     */
+    function updateEthPricePerToken(uint256 _ethPricePerToken) external onlyOperator {
+        if (_ethPricePerToken == 0) revert InvalidEthPrice();
+        emit EthPricePerTokenUpdated(address(token), _ethPricePerToken);
+        ethPricePerToken = _ethPricePerToken;
+    }
+
+    /**
+     * @param _root new root of the allocation merkle tree.
+     * This function is used to update the allocation merkle tree root.
+     */
+    function updateRoot(bytes32 _root) external onlyOperator {
+        emit RootUpdated(_root);
+        isRootSet = true;
+        root = _root;
+    }
+
+    /**
      * @param _startDate new start date
      * @param _endDate new end date
      * This function is used to change the start and end dates of the launchpad.
@@ -161,30 +181,11 @@ contract LaunchpadV2 {
      * @param _endDate new end date
      */
     function _updateDates(uint256 _startDate, uint256 _endDate) private {
+        if (isStarted()) revert Started();
         if (_endDate <= _startDate) revert InvalidEndDate();
         if (_startDate <= block.timestamp) revert InvalidStartDate();
         startDate = _startDate;
         endDate = _endDate;
-    }
-
-    /**
-     * @param _ethPricePerToken new ETH price per token
-     * This function is used to change the ETH price per token.
-     */
-    function updateEthPricePerToken(uint256 _ethPricePerToken) external onlyOperator {
-        if (_ethPricePerToken == 0) revert InvalidEthPrice();
-        emit EthPricePerTokenUpdated(address(token), _ethPricePerToken);
-        ethPricePerToken = _ethPricePerToken;
-    }
-
-    /**
-     * @param _root new root of the allocation merkle tree.
-     * This function is used to update the allocation merkle tree root.
-     */
-    function updateRoot(bytes32 _root) external onlyOperator {
-        emit RootUpdated(_root);
-        isRootSet = true;
-        root = _root;
     }
 
     /**
