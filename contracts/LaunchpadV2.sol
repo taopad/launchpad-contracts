@@ -227,7 +227,9 @@ contract LaunchpadV2 {
      * This function is used to calculate the amount of tokens that the user will receive for the given amount of ETH.
      */
     function ethToToken(uint256 _ethAmount) public view returns (uint256) {
-        return _ethAmount * tokenUnit / ethPricePerToken;
+        uint256 _ethPricePerToken = ethPricePerToken;
+        if (_ethPricePerToken == 0) return 0;
+        return _ethAmount * tokenUnit / _ethPricePerToken;
     }
 
     /**
