@@ -59,7 +59,6 @@ contract LaunchpadV2 {
     bytes32 public root;
 
     bool public isRootSet;
-    bool public isValidated; // launchpad parameters must be validated after deployment.
 
     constructor(
         MainLaunchpadInfo memory _info,
@@ -71,15 +70,7 @@ contract LaunchpadV2 {
         name = _info.name;
         factory = _factory;
 
-        // remaining check are done in the validate function now.
-
         if (_operator == address(0)) revert ZeroAddress();
-        if (_info.minTokenBuy == 0) revert InvalidMinTokenBuy();
-
-        if (_info.startDate > 0) {
-            if (_info.startDate <= block.timestamp) revert InvalidStartDate();
-            if (_info.endDate <= _info.startDate) revert InvalidEndDate();
-        }
 
         operator = _operator;
 
@@ -88,11 +79,13 @@ contract LaunchpadV2 {
         tokenUnit = 10 ** decimals;
 
         ethPricePerToken = _info.ethPricePerToken;
-        minTokenBuy = _info.minTokenBuy == 0 ? tokenUnit : _info.minTokenBuy;
-        // maxTokenBuy = _info.maxTokenBuy; // no more global max buy
+        minTokenBuy = _info.minTokenBuy > tokenUnit ? _info.minTokenBuy : tokenUnit; // min and default to 1 unit.
+        // maxTokenBuy = _info.maxTokenBuy; // no more global max value.
 
-        startDate = _info.startDate;
-        endDate = _info.endDate;
+        // can set dates later.
+        if (_info.startDate > 0) {
+            _updateDates(_info.startDate, _info.endDate);
+        }
 
         protocolFee = _protocolFee;
         protocolFeeAddress = _protocolFeeAddress;
@@ -105,21 +98,21 @@ contract LaunchpadV2 {
      * @return true if the launchpad has started
      */
     function isStarted() public view returns (bool) {
-        return isValidated && block.timestamp >= startDate;
+        return startDate > 0 && block.timestamp >= startDate;
     }
 
     /**
      * @return true if the launchpad has ended
      */
     function isEnded() public view returns (bool) {
-        return isValidated && block.timestamp >= endDate;
+        return startDate > 0 && block.timestamp >= endDate;
     }
 
     /**
      * @return true if the tokens in the launchpad are claimable
      */
     function isClaimable() public view returns (bool) {
-        return isValidated && block.timestamp >= endDate + releaseDelay;
+        return startDate > 0 && block.timestamp >= endDate + releaseDelay;
     }
 
     /**
@@ -147,15 +140,10 @@ contract LaunchpadV2 {
      * @param _startDate new start date
      * @param _endDate new end date
      * This function is used to change the start and end dates of the launchpad.
-     * Can't update anymore once it has been validated.
      */
-    function updateDates(uint256 _startDate, uint256 _endDate) public onlyOperator {
-        if (isValidated) revert AlreadyValidated();
-        if (_endDate <= _startDate) revert InvalidEndDate();
-        if (_startDate <= block.timestamp) revert InvalidStartDate();
+    function updateDates(uint256 _startDate, uint256 _endDate) external onlyOperator {
+        _updateDates(_startDate, _endDate);
         emit DatesUpdated(_startDate, _endDate);
-        startDate = _startDate;
-        endDate = _endDate;
     }
 
     /**
@@ -164,7 +152,19 @@ contract LaunchpadV2 {
      * This function is an helper function to change start and end dates of the launchpad.
      */
     function updateStartDateAndDuration(uint256 _startDate, uint256 _duration) external onlyOperator {
-        updateDates(_startDate, _startDate + _duration);
+        _updateDates(_startDate, _startDate + _duration);
+        emit DatesUpdated(_startDate, _startDate + _duration);
+    }
+
+    /**
+     * @param _startDate new start date
+     * @param _endDate new end date
+     */
+    function _updateDates(uint256 _startDate, uint256 _endDate) private {
+        if (_endDate <= _startDate) revert InvalidEndDate();
+        if (_startDate <= block.timestamp) revert InvalidStartDate();
+        startDate = _startDate;
+        endDate = _endDate;
     }
 
     /**
@@ -222,26 +222,6 @@ contract LaunchpadV2 {
     }
 
     /**
-     * Validate the launchpad configuration so it can actually start with the current parameters.
-     */
-    function validate() external onlyOperator {
-        if (isValidated) revert AlreadyValidated();
-        if (tokenHardCap == 0) revert InvalidHardCap();
-        if (ethPricePerToken == 0) revert InvalidEthPrice();
-        if (startDate == 0) revert InvalidStartDate();
-        if (block.timestamp >= endDate) revert InvalidEndDate();
-        if (!isRootSet) revert RootNotSet();
-
-        uint256 _tokenBalance = token.balanceOf(address(this));
-
-        if (_tokenBalance < tokenHardCap) {
-            revert InvalidTokenBalance();
-        }
-
-        isValidated = true;
-    }
-
-    /**
      * @param _ethAmount amount of ETH
      * @return the amount of tokens that the user will receive for the given amount of ETH
      * This function is used to calculate the amount of tokens that the user will receive for the given amount of ETH.
@@ -260,6 +240,7 @@ contract LaunchpadV2 {
     function buyTokens(address _address, uint256 _maxTokenBuy, bytes32[] calldata _proof) external payable {
         if (isEnded()) revert Ended();
         if (!isStarted()) revert NotStarted();
+        if (!isRootSet) revert RootNotSet();
         if (msg.value == 0) revert InvalidBuyAmount();
 
         uint256 _tokensAmount = ethToToken(msg.value);
