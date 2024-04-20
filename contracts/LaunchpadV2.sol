@@ -347,18 +347,10 @@ contract LaunchpadV2 {
         }
 
         if (_feeAmount > 0) {
-            (bool success1,) = payable(protocolFeeAddress).call{value: _feeAmount}("");
-
-            if (!success1) {
-                revert EthereumFeeTransferFailed();
-            }
+            transferEth(protocolFeeAddress, _feeAmount);
         }
 
-        (bool success2,) = payable(msg.sender).call{value: _actualEthAmount}("");
-
-        if (!success2) {
-            revert EthereumTransferFailed();
-        }
+        transferEth(msg.sender, _actualEthAmount);
     }
 
     /**
@@ -382,5 +374,16 @@ contract LaunchpadV2 {
         }
 
         token.safeTransfer(msg.sender, _balance);
+    }
+
+    /**
+     * Eth transfer helper.
+     */
+    function transferEth(address to, uint256 amount) private {
+        (bool success,) = payable(to).call{value: amount}("");
+
+        if (!success) {
+            revert EthereumFeeTransferFailed();
+        }
     }
 }
