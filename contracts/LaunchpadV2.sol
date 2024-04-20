@@ -123,8 +123,8 @@ contract LaunchpadV2 {
         if (_operator == address(0)) revert ZeroAddress();
         if (_operator == operator) revert SameOperator();
 
-        emit OperatorTransferred(operator, _operator);
         operator = _operator;
+        emit OperatorTransferred(operator, _operator);
     }
 
     /**
@@ -132,8 +132,8 @@ contract LaunchpadV2 {
      * This function is used to change the name of the launchpad.
      */
     function updateName(string memory _name) external onlyOperator {
-        emit NameUpdated(_name);
         name = _name;
+        emit NameUpdated(_name);
     }
 
     /**
@@ -142,8 +142,8 @@ contract LaunchpadV2 {
      */
     function updateEthPricePerToken(uint256 _ethPricePerToken) external onlyOperator {
         if (_ethPricePerToken == 0) revert InvalidEthPrice();
-        emit EthPricePerTokenUpdated(address(token), _ethPricePerToken);
         ethPricePerToken = _ethPricePerToken;
+        emit EthPricePerTokenUpdated(address(token), _ethPricePerToken);
     }
 
     /**
@@ -151,9 +151,9 @@ contract LaunchpadV2 {
      * This function is used to update the allocation merkle tree root.
      */
     function updateRoot(bytes32 _root) external onlyOperator {
-        emit RootUpdated(_root);
         isRootSet = true;
         root = _root;
+        emit RootUpdated(_root);
     }
 
     /**
@@ -195,8 +195,8 @@ contract LaunchpadV2 {
      */
     function updateReleaseDelay(uint256 _releaseDelay) external onlyOperator {
         if (isEnded()) revert Ended();
-        emit ReleaseDelayUpdated(_releaseDelay);
         releaseDelay = _releaseDelay;
+        emit ReleaseDelayUpdated(_releaseDelay);
     }
 
     /**
@@ -206,8 +206,8 @@ contract LaunchpadV2 {
      */
     function updateVestingDuration(uint256 _vestingDuration) external onlyOperator {
         if (isEnded()) revert Ended();
-        emit VestingDurationUpdated(_vestingDuration);
         vestingDuration = _vestingDuration;
+        emit VestingDurationUpdated(_vestingDuration);
     }
 
     /**
@@ -217,9 +217,9 @@ contract LaunchpadV2 {
      */
     function increaseHardCap(uint256 _tokenHardCapIncrement) external onlyOperator {
         if (_tokenHardCapIncrement == 0) revert InvalidTokenHardCapIncrement();
-        emit TokenHardCapUpdated(address(token), tokenHardCap);
         IERC20(token).safeTransferFrom(msg.sender, address(this), _tokenHardCapIncrement);
         tokenHardCap += _tokenHardCapIncrement;
+        emit TokenHardCapUpdated(address(token), tokenHardCap);
     }
 
     /**
