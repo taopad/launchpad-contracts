@@ -10,10 +10,38 @@ import {
   LaunchpadDeployer__factory,
   LaunchpadFactory__factory,
   TokenMockup__factory,
+  LaunchpadV2__factory,
+  LaunchpadFactory,
+  LaunchpadV2,
+  TokenMockup,
 } from "../typechain-types";
+import keccak256 from "keccak256";
+import MerkleTree from "merkletreejs";
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+
+interface LaunchpadTestContext {
+  token: TokenMockup;
+  tokenOwner: SignerWithAddress;
+  launchpadFactory: LaunchpadFactory;
+  deployer: SignerWithAddress;
+  protocolFeeAddress: SignerWithAddress;
+  launchpadV2: LaunchpadV2; 
+  users: SignerWithAddress[];
+  proofs: string[][];
+}
+
 
 function consoleLog(...args: any[]) {
   //console.log(...args);
+}
+
+function createWhitelist(users: any[]) {
+  const leaves = users.map(addr => keccak256(addr));
+  const tree = new MerkleTree(leaves, keccak256, { sortPairs: true });
+  const root = tree.getRoot().toString('hex');
+  const proofs = users.map(addr => tree.getHexProof(keccak256(addr)));
+
+  return { tree, root, proofs };
 }
 
 async function deployTokenFixture() {
@@ -22,7 +50,6 @@ async function deployTokenFixture() {
   const token = await new TokenMockup__factory(tokenOwner).deploy();
   await token.deployed();
 
-  // Fixtures can return anything you consider useful for your tests
   return { token, tokenOwner };
 }
 
@@ -38,6 +65,56 @@ async function deployLaunchpadFixture() {
   await launchpadFactory.deployed();
 
   return { launchpadFactory, deployer, protocolFeeAddress };
+}
+
+async function deployLaunchpadV2Fixture() {
+  const [deployer, protocolFeeAddress, ...users] = await ethers.getSigners();
+
+  const token = await new TokenMockup__factory(deployer).deploy();
+  await token.deployed();
+
+  const launchpadDeployer = await new LaunchpadDeployer__factory(deployer).deploy();
+  const launchpadFactory = await new LaunchpadFactory__factory(deployer).deploy(
+    protocolFeeAddress.address,
+    100,
+    launchpadDeployer.address
+  );
+  await launchpadFactory.deployed();
+
+  const { root, proofs } = createWhitelist(users.map(u => u.address));
+
+  // Get the current block timestamp
+  const currentBlock = await ethers.provider.getBlock('latest');
+  const startDate = currentBlock.timestamp + 1000;  // Calculate start date
+  const endDate = startDate + 604800;  // Calculate end date
+
+  const launchpadInfo = {
+    name: "TBNK Seed Round",
+    token: token.address,
+    ethPricePerToken: ethers.utils.parseEther("0.000022"),
+    minTokenBuy: ethers.utils.parseEther("100"),
+    maxTokenBuy: ethers.utils.parseEther("10000"),
+    startDate: startDate,
+    endDate: endDate,
+    releaseDelay: 172800, // 2 days
+    vestingDuration: 864000, // 10 days
+    root: root  // Root of the Merkle tree for whitelisting
+  };
+
+  await launchpadFactory.connect(deployer).createLaunchpad(launchpadInfo);
+  const launchpadAddress = await launchpadFactory.launchpadAtIndex(0);
+  const launchpadV2 = LaunchpadV2__factory.connect(launchpadAddress, deployer);
+
+  return {
+    token,
+    tokenOwner: deployer,
+    launchpadFactory,
+    deployer,
+    protocolFeeAddress,
+    launchpadV2,
+    users,
+    proofs
+  };
 }
 
 async function deployCoreProtocolFixture() {
@@ -111,6 +188,36 @@ describe("TaoPad Launch Pad", function () {
     });
   });
 
+    
+  describe("Whitelist and Merkle Proof Verification", function () {
+    let fixtures: LaunchpadTestContext;  
+  
+    before(async () => {
+      fixtures = await loadFixture(deployLaunchpadV2Fixture);
+    });
+  
+    it("should allow a whitelisted user to participate in the presale with valid proof", async function () {
+      const { launchpadV2, users, proofs } = fixtures;  
+      const user1 = users[0];
+      const proof = proofs[0];
+      const maxTokenAmount = ethers.utils.parseEther("500");
+  
+      await expect(launchpadV2.connect(user1).buyTokens(user1.address, maxTokenAmount, proof, { value: ethers.utils.parseEther("1") }))
+        .to.emit(launchpadV2, 'TokensPurchased')
+        .withArgs(user1.address, ethers.utils.parseEther("1"), anyValue);  // TODO: Adjust `anyValue` as necessary
+    });
+  
+    it("should reject a user trying to participate without valid proof", async function () {
+      const { launchpadV2, users } = fixtures;
+      const user2 = users[1];
+      const invalidProof: string[] = [];  
+      const maxTokenAmount = ethers.utils.parseEther("500");
+  
+      await expect(launchpadV2.connect(user2).buyTokens(user2.address, maxTokenAmount, invalidProof, { value: ethers.utils.parseEther("1") }))
+        .to.be.revertedWith("InvalidProof");
+    });
+  });
+  
   describe("Core Protocol Logic", function () {
     it("Should create a new project presale", async function () {
       const {
