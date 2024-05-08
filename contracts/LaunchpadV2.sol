@@ -13,19 +13,16 @@ import "./constants/Errors.sol";
 contract LaunchpadV2 {
     using SafeERC20 for IERC20;
 
-    event NameUpdated(string newName);
-    event RootUpdated(bytes32 newRoot);
-    event DatesUpdated(uint256 newStartDate, uint256 newEndDate);
-    event TokensClaimed(address indexed _token, address indexed buyer, uint256 amount);
     event TokensPurchased(address indexed _token, address indexed buyer, uint256 amount);
+    event TokensClaimed(address indexed _token, address indexed buyer, uint256 amount);
+    event ethPricePerTokenUpdated(address indexed _token, uint256 newEthPricePerToken);
+    event WhitelistUpdated(uint256 wlBlockNumber, uint256 wlMinBalance, bytes32 wlRoot);
     event TokenHardCapUpdated(address indexed _token, uint256 newTokenHardCap);
     event OperatorTransferred(address indexed previousOperator, address indexed newOperator);
-    event ReleaseDelayUpdated(uint256 newReleaseDelay);
     event VestingDurationUpdated(uint256 newVestingDuration);
-    event EthPricePerTokenUpdated(address indexed _token, uint256 newEthPricePerToken);
 
     modifier onlyOperator() {
-        if (msg.sender != operator) revert NotOperator();
+        if (msg.sender != operator) revert OperatorZeroAddress();
         _;
     }
 
@@ -42,6 +39,7 @@ contract LaunchpadV2 {
     uint256 public tokenHardCap;
 
     uint256 public minTokenBuy;
+    // uint256 public maxTokenBuy; // no more max token buy we now use one per address
 
     uint256 public startDate;
     uint256 public endDate;
@@ -56,9 +54,9 @@ contract LaunchpadV2 {
     mapping(address => uint256) public claimedAmount;
     uint256 public totalPurchasedAmount;
 
-    bytes32 public root;
-
-    bool public isRootSet;
+    uint256 public wlBlockNumber;
+    uint256 public wlMinBalance;
+    bytes32 public wlRoot;
 
     constructor(
         MainLaunchpadInfo memory _info,
@@ -70,6 +68,11 @@ contract LaunchpadV2 {
         name = _info.name;
         factory = _factory;
 
+        if (_info.ethPricePerToken == 0) revert InvalidEthPrice();
+        if (_info.minTokenBuy == 0) revert InvalidMinTokenBuy();
+        // if (_info.maxTokenBuy == 0) revert InvalidMaxTokenBuy();
+        if (_info.startDate <= block.timestamp) revert InvalidStartDate();
+        if (_info.endDate <= _info.startDate) revert InvalidEndDate();
         if (_operator == address(0)) revert ZeroAddress();
 
         operator = _operator;
@@ -79,13 +82,11 @@ contract LaunchpadV2 {
         tokenUnit = 10 ** decimals;
 
         ethPricePerToken = _info.ethPricePerToken;
-        minTokenBuy = _info.minTokenBuy > tokenUnit ? _info.minTokenBuy : tokenUnit; // min and default to 1 unit.
-        // maxTokenBuy = _info.maxTokenBuy; // no more global max value.
+        minTokenBuy = _info.minTokenBuy;
+        // maxTokenBuy = _info.maxTokenBuy;
 
-        // can set dates later.
-        if (_info.startDate > 0) {
-            _updateDates(_info.startDate, _info.endDate);
-        }
+        startDate = _info.startDate;
+        endDate = _info.endDate;
 
         protocolFee = _protocolFee;
         protocolFeeAddress = _protocolFeeAddress;
@@ -98,169 +99,117 @@ contract LaunchpadV2 {
      * @return true if the launchpad has started
      */
     function isStarted() public view returns (bool) {
-        return startDate > 0 && block.timestamp >= startDate;
+        return block.timestamp >= startDate;
     }
 
     /**
      * @return true if the launchpad has ended
      */
     function isEnded() public view returns (bool) {
-        return startDate > 0 && block.timestamp >= endDate;
+        return block.timestamp >= endDate;
     }
 
     /**
      * @return true if the tokens in the launchpad are claimable
      */
     function isClaimable() public view returns (bool) {
-        return startDate > 0 && block.timestamp >= endDate + releaseDelay;
+        return block.timestamp >= endDate + releaseDelay;
     }
 
     /**
-     * @param _operator new operator address
+     *
+     * @param newOperator new operator address
      * This function is used to transfer ownership of the launchpad to another address.
      */
-    function transferOperatorOwnership(address _operator) external onlyOperator {
-        if (_operator == address(0)) revert ZeroAddress();
-        if (_operator == operator) revert SameOperator();
+    function transferOperatorOwnership(address newOperator) external onlyOperator {
+        if (newOperator == address(0)) revert ZeroAddress();
+        if (newOperator == operator) revert SameOperator();
 
-        operator = _operator;
-        emit OperatorTransferred(operator, _operator);
+        emit OperatorTransferred(operator, newOperator);
+        operator = newOperator;
     }
 
     /**
-     * @param _name new name of the launchpad
-     * This function is used to change the name of the launchpad.
+     * @param _wlBlockNumber block number of the whitelist's snapshot
+     * @param _wlMinBalance min balance threshold of the whitelist
+     * @param _wlMinBalance merkle tree root of the whitelist
+     *
+     * When set, the buyTokens() will require a proof matching the buyer address and this root.
      */
-    function updateName(string memory _name) external onlyOperator {
-        name = _name;
-        emit NameUpdated(_name);
+    function updateWhitelist(uint256 _wlBlockNumber, uint256 _wlMinBalance, bytes32 _wlRoot) external onlyOperator {
+        wlBlockNumber = _wlBlockNumber;
+        wlMinBalance = _wlMinBalance;
+        wlRoot = _wlRoot;
+
+        emit WhitelistUpdated(wlBlockNumber, wlMinBalance, wlRoot);
     }
 
     /**
-     * @param _ethPricePerToken new ETH price per token
-     * This function is used to change the ETH price per token.
-     */
-    function updateEthPricePerToken(uint256 _ethPricePerToken) external onlyOperator {
-        if (_ethPricePerToken == 0) revert InvalidEthPrice();
-        ethPricePerToken = _ethPricePerToken;
-        emit EthPricePerTokenUpdated(address(token), _ethPricePerToken);
-    }
-
-    /**
-     * @param _root new root of the allocation merkle tree.
-     * This function is used to update the allocation merkle tree root.
-     */
-    function updateRoot(bytes32 _root) external onlyOperator {
-        isRootSet = true;
-        root = _root;
-        emit RootUpdated(_root);
-    }
-
-    /**
-     * @param _startDate new start date
-     * @param _endDate new end date
-     * This function is used to change the start and end dates of the launchpad.
-     */
-    function updateDates(uint256 _startDate, uint256 _endDate) external onlyOperator {
-        _updateDates(_startDate, _endDate);
-        emit DatesUpdated(_startDate, _endDate);
-    }
-
-    /**
-     * @param _startDate new start date
-     * @param _duration duration of the launchpad
-     * This function is an helper function to change start and end dates of the launchpad.
-     */
-    function updateStartDateAndDuration(uint256 _startDate, uint256 _duration) external onlyOperator {
-        _updateDates(_startDate, _startDate + _duration);
-        emit DatesUpdated(_startDate, _startDate + _duration);
-    }
-
-    /**
-     * @param _startDate new start date
-     * @param _endDate new end date
-     */
-    function _updateDates(uint256 _startDate, uint256 _endDate) private {
-        if (isStarted()) revert Started();
-        if (_endDate <= _startDate) revert InvalidEndDate();
-        if (_startDate <= block.timestamp) revert InvalidStartDate();
-        startDate = _startDate;
-        endDate = _endDate;
-    }
-
-    /**
-     * @param _releaseDelay new release delay
-     * This function is used to change the release delay of the launchpad.
-     * Can't update anymore once the launchpad ended.
-     */
-    function updateReleaseDelay(uint256 _releaseDelay) external onlyOperator {
-        if (isEnded()) revert Ended();
-        releaseDelay = _releaseDelay;
-        emit ReleaseDelayUpdated(_releaseDelay);
-    }
-
-    /**
-     * @param _vestingDuration new vesting duration
-     * This function is used to change the vesting duration of the launchpad.
-     * Can't update anymore once the launchpad ended.
-     */
-    function updateVestingDuration(uint256 _vestingDuration) external onlyOperator {
-        if (isEnded()) revert Ended();
-        vestingDuration = _vestingDuration;
-        emit VestingDurationUpdated(_vestingDuration);
-    }
-
-    /**
+     *
      * @param _tokenHardCapIncrement amount of tokens to increase the hard cap by
      * This function is used to increase the hard cap of the launchpad.
      * The operator can increase the hard cap by any amount of tokens.
      */
     function increaseHardCap(uint256 _tokenHardCapIncrement) external onlyOperator {
         if (_tokenHardCapIncrement == 0) revert InvalidTokenHardCapIncrement();
+
+        uint256 _feeAmount = _tokenHardCapIncrement * protocolFee / 10000;
+        if (_feeAmount > 0) {
+            token.safeTransferFrom(msg.sender, protocolFeeAddress, _feeAmount);
+            _tokenHardCapIncrement -= _feeAmount;
+        }
+
         IERC20(token).safeTransferFrom(msg.sender, address(this), _tokenHardCapIncrement);
         tokenHardCap += _tokenHardCapIncrement;
         emit TokenHardCapUpdated(address(token), tokenHardCap);
     }
 
     /**
-     * @param _ethAmount amount of ETH
-     * @return the amount of tokens that the user will receive for the given amount of ETH
-     * This function is used to calculate the amount of tokens that the user will receive for the given amount of ETH.
+     *
+     * @param _ethPricePerToken new ETH price per token
+     * This function is used to change the ETH price per token.
      */
-    function ethToToken(uint256 _ethAmount) public view returns (uint256) {
-        uint256 _ethPricePerToken = ethPricePerToken;
-        if (_ethPricePerToken == 0) return 0;
-        return _ethAmount * tokenUnit / _ethPricePerToken;
+    function updateEthPricePerToken(uint256 _ethPricePerToken) external onlyOperator {
+        if (_ethPricePerToken == 0) revert InvalidEthPrice();
+        emit ethPricePerTokenUpdated(address(token), _ethPricePerToken);
+        ethPricePerToken = _ethPricePerToken;
     }
 
     /**
-     * @param _address the address of the buyer
-     * @param _maxTokenBuy the maximum amount of tokens the buyer can purchase
-     * @param _proof the proof matching the (addr, maxTokenBuy, root) combination
-     * Allows the user to buy tokens during the launchpad. Anyone can buy for another address as long
-     * as the matching proof is provided. Usefull for external integrators like Zappers.
+     *
+     * @param ethAmount amount of ETH
+     * @return the amount of tokens that the user will receive for the given amount of ETH
+     * This function is used to calculate the amount of tokens that the user will receive for the given amount of ETH.
      */
-    function buyTokens(address _address, uint256 _maxTokenBuy, bytes32[] calldata _proof) external payable {
-        if (isEnded()) revert Ended();
+    function ethToToken(uint256 ethAmount) public view returns (uint256) {
+        return ethAmount * tokenUnit / ethPricePerToken;
+    }
+
+    /**
+     * @param maxTokenBuy max allocation from the linear allocation computation.
+     * @param proof the proof in case this launchpad has a whitelist, empty otherwise.
+     * Allows the user to buy tokens during the launchpad.
+     */
+    function buyTokens(uint256 maxTokenBuy, bytes32[] calldata proof) external payable {
         if (!isStarted()) revert NotStarted();
-        if (!isRootSet) revert RootNotSet();
+        if (isEnded()) revert Ended();
         if (msg.value == 0) revert InvalidBuyAmount();
 
-        uint256 _tokensAmount = ethToToken(msg.value);
-
-        bool _verifiction = MerkleProof.verifyCalldata(
-            _proof, root, keccak256(bytes.concat(keccak256(abi.encode(_address, _maxTokenBuy))))
-        );
-
-        if (!_verifiction) {
-            revert InvalidProof();
+        // always check proof validity.
+        if (
+            !MerkleProof.verifyCalldata(
+                proof, wlRoot, keccak256(bytes.concat(keccak256(abi.encode(msg.sender, maxTokenBuy))))
+            )
+        ) {
+            revert InvalidWhitelistProof();
         }
 
+        uint256 _tokensAmount = ethToToken(msg.value);
         if (_tokensAmount < minTokenBuy) {
             revert AmountTooLow();
         }
 
-        if (purchasedAmount[_address] + _tokensAmount > _maxTokenBuy) {
+        if (purchasedAmount[msg.sender] + _tokensAmount > maxTokenBuy) {
             revert AmountExceedsMaxTokenAmount();
         }
 
@@ -268,13 +217,14 @@ contract LaunchpadV2 {
             revert AmountExceedsHardCap();
         }
 
-        purchasedAmount[_address] += _tokensAmount;
+        purchasedAmount[msg.sender] += _tokensAmount;
         totalPurchasedAmount += _tokensAmount;
 
-        emit TokensPurchased(address(token), _address, _tokensAmount);
+        emit TokensPurchased(address(token), msg.sender, _tokensAmount);
     }
 
     /**
+     *
      * @param _address address of the user
      * @return the amount of tokens that the user can claim
      * This function is used to calculate the amount of tokens that the user can claim.
@@ -305,52 +255,43 @@ contract LaunchpadV2 {
     }
 
     /**
-     * @param _address address of the user
      * Allows the user to claim their tokens after the launchpad has ended.
      * The tokens are released linearly over the vesting duration.
      */
-    function claimTokens(address _address) external {
+    function claimTokens() external {
         if (!isClaimable()) {
             revert NotClaimable();
         }
-
-        if (purchasedAmount[_address] == 0) {
+        if (purchasedAmount[msg.sender] == 0) {
             revert NoPurchasedTokens();
         }
 
-        uint256 _claimableAmount = claimableAmount(_address);
-
+        uint256 _claimableAmount = claimableAmount(msg.sender);
         if (_claimableAmount == 0) {
             revert NoClaimableTokens();
         }
+        claimedAmount[msg.sender] += _claimableAmount;
 
-        claimedAmount[_address] += _claimableAmount;
+        token.safeTransfer(msg.sender, _claimableAmount);
 
-        token.safeTransfer(_address, _claimableAmount);
-
-        emit TokensClaimed(address(token), _address, _claimableAmount);
+        emit TokensClaimed(address(token), msg.sender, _claimableAmount);
     }
 
     /**
      * Allows the operator to withdraw ETH after the launchpad has ended.
-     * Protocol fee are taked here.
      */
     function withdrawEth() external onlyOperator {
-        if (!isEnded()) revert NotEnded();
-
+        if (!isEnded()) {
+            revert NotEnded();
+        }
         uint256 _balance = address(this).balance;
-        uint256 _feeAmount = _balance * protocolFee / 10000;
-        uint256 _actualEthAmount = _balance - _feeAmount;
-
-        if (_actualEthAmount == 0) {
+        if (_balance == 0) {
             revert NoBalanceToWithdraw();
         }
-
-        if (_feeAmount > 0) {
-            transferEth(protocolFeeAddress, _feeAmount);
+        (bool success,) = payable(msg.sender).call{value: _balance}("");
+        if (!success) {
+            revert EthereumTransferFailed();
         }
-
-        transferEth(msg.sender, _actualEthAmount);
     }
 
     /**
@@ -358,8 +299,9 @@ contract LaunchpadV2 {
      * This is useful in case the launchpad has not sold all the tokens.
      */
     function withdrawTokens() external onlyOperator {
-        if (!isEnded()) revert NotEnded();
-
+        if (!isEnded()) {
+            revert NotEnded();
+        }
         uint256 _balance = token.balanceOf(address(this));
         uint256 _purchasedAmount = totalPurchasedAmount;
 
@@ -372,18 +314,50 @@ contract LaunchpadV2 {
         if (_balance <= 0) {
             revert NoBalanceToWithdraw();
         }
-
         token.safeTransfer(msg.sender, _balance);
     }
 
     /**
-     * Eth transfer helper.
+     *
+     * @param _vestingDuration new vesting duration
+     * This function is used to change the vesting duration of the launchpad.
      */
-    function transferEth(address to, uint256 amount) private {
-        (bool success,) = payable(to).call{value: amount}("");
-
-        if (!success) {
-            revert EthereumFeeTransferFailed();
-        }
+    function setVestingDuration(uint256 _vestingDuration) external onlyOperator {
+        require(!isEnded(), "Launchpad: ENDED");
+        emit VestingDurationUpdated(_vestingDuration);
+        vestingDuration = _vestingDuration;
     }
+
+    /**
+     *
+     * @param _name new name of the launchpad
+     * This function is used to change the name of the launchpad.
+     */
+    function setName(string memory _name) external onlyOperator {
+        name = _name;
+    }
+
+    // this cant work with a personalized maxTokenBuy
+    //    /**
+    //     *
+    //     * @param _newOwner new owner address
+    //     * This function is used to transfer ownership of purchased tokens to another address.
+    //     * This is useful for external integrators suchs as Zappers,
+    //     * which need to transfer ownership of purchased tokens to the user.
+    //     */
+    //    function transferPurchasedOwnership(address _newOwner) external {
+    //        if (isEnded()) {
+    //            revert Ended();
+    //        }
+    //
+    //        uint256 _purchasedAmount = purchasedAmount[msg.sender];
+    //        uint256 _newUserPurchaseAmount = purchasedAmount[_newOwner];
+    //
+    //        if (_newUserPurchaseAmount + _purchasedAmount > maxTokenBuy) {
+    //            revert AmountExceedsMaxTokenAmount();
+    //        }
+    //
+    //        purchasedAmount[msg.sender] = 0;
+    //        purchasedAmount[_newOwner] += _purchasedAmount;
+    //    }
 }
